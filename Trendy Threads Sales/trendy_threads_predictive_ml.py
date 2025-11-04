@@ -2,12 +2,14 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy.stats import randint, uniform
 
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import GridSearchCV
 from sklearn.tree import DecisionTreeRegressor, plot_tree
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_absolute_error, mean_absolute_percentage_error
+from sklearn.model_selection import RandomizedSearchCV
 
 from xgboost import XGBRegressor
 from xgboost import plot_importance
@@ -95,7 +97,7 @@ df.loc[max]
 df.columns
 # Split train and test data.
 y = df['sales']
-X = df[['month_int', 'year', '4mo_rolling']]
+X = df[['month_int', 'year']]
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=.25, random_state=42)
 
 # Create and fit the model.
@@ -126,10 +128,115 @@ plot_tree(
     )
 plt.show()
 
-# Create an XGBoost model
+### Test Perameters and features for an XGBoost model ###
+
+# Test perameters
+from scipy.stats import randint, uniform
+from sklearn.model_selection import RandomizedSearchCV
+
+param_dist = {
+    'max_depth': randint(3, 8),
+    'min_child_weight': randint(1, 6),
+    'learning_rate': uniform(0.01, 0.2),
+    'n_estimators': randint(20, 200),
+    'subsample': uniform(0.6, 0.4),
+    'colsample_bytree': uniform(0.6, 0.4)
+}
+
+xgb_rand = RandomizedSearchCV(
+    XGBRegressor(objective='reg:squarederror', random_state=42),
+    param_distributions=param_dist,
+    n_iter=25,
+    scoring='r2',
+    cv=5,
+    random_state=42)
+
+xgb_rand.fit(X_train, y_train)
+print("Best parameters found:", xgb_rand.best_params_)
+print("Best R² (CV):", xgb_rand.best_score_)
+
+xgb_best = xgb_rand.best_estimator_
+
+y_pred = xgb_best.predict(X_test)
+
+r2 = r2_score(y_test, y_pred)
+mae = mean_absolute_error(y_test, y_pred)
+mape = mean_absolute_percentage_error(y_test, y_pred)
+norm_error = mae / np.std(df['sales'])
+
+print(f"Test R²: {r2:.3f}")
+print(f"Mean Absolute Error: ${mae:,.2f}")
+print(f"MAPE: {mape*100:.2f}%")
+print(f"Normalized Error: {norm_error:.3f}")
+
+# Test X values
+
+feature_sets = [
+    ['year', 'month_int', 'real_wina'],
+    ['year', 'month_int', 'real_wina', 'last_month'],
+    ['year', 'month_int', 'real_wina', '2mo_rolling'],
+    ['year', 'month_int', 'real_wina', 'last_month', '2mo_rolling'],
+    ['year', 'month_int', 'real_wina', 'last_month', '2mo_rolling', '4mo_rolling', '5mo_rolling']
+]
+
+param_dist = {
+    'max_depth': randint(3, 8),
+    'min_child_weight': randint(1, 6),
+    'learning_rate': uniform(0.01, 0.2),
+    'n_estimators': randint(20, 200),
+    'subsample': uniform(0.6, 0.4),
+    'colsample_bytree': uniform(0.6, 0.4)
+}
+
+# Loop through each feature set
+results = []
+for features in feature_sets:
+    print(f"\nTesting feature set: {features}")
+    X = df[features]
+    y = df['sales']
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.25, random_state=42
+    )
+
+    xgb_rand = RandomizedSearchCV(
+        XGBRegressor(objective='reg:squarederror', random_state=42),
+        param_distributions=param_dist,
+        n_iter=25,
+        scoring='r2',
+        cv=5,
+        random_state=42
+    )
+
+    xgb_rand.fit(X_train, y_train)
+
+    y_pred = xgb_rand.predict(X_test)
+
+    r2 = r2_score(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    mape = mean_absolute_percentage_error(y_test, y_pred)
+
+    results.append({
+        'features': features,
+        'cv_r2': xgb_rand.best_score_,
+        'test_r2': r2,
+        'mae': mae,
+        'mape': mape,
+        'best_params': xgb_rand.best_params_
+    })
+
+# Show best feature set
+results_df = pd.DataFrame(results)
+results_df_sorted = results_df.sort_values(by='test_r2', ascending=False)
+plt.figure(figsize=(8,4))
+plt.barh(range(len(results_df_sorted)), results_df_sorted['test_r2'], align='center')
+plt.yticks(range(len(results_df_sorted)), [', '.join(fs) for fs in results_df_sorted['features']])
+plt.show()
+
+# Create an XGBoost model using best perameters and features
 df.columns
 y = df['sales']
-X = df[['year', 'month_int', 'real_wina']]
+X = df[['year', 'month_int', 'real_wina', 'last_month', '2mo_rolling']]
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
 
 xgb = XGBRegressor(objective='reg:squarederror', random_state=42)
@@ -174,50 +281,3 @@ if  best_r2_dif > -0.05 and best_r2_dif < 0.05:
 else:
     print('The model may overfit the data.')
 best_r2_dif
-
-
-
-# Test perams
-from scipy.stats import randint, uniform
-from sklearn.model_selection import RandomizedSearchCV
-
-param_dist = {
-    'max_depth': randint(3, 8),
-    'min_child_weight': randint(1, 6),
-    'learning_rate': uniform(0.01, 0.2),
-    'n_estimators': randint(20, 200),
-    'subsample': uniform(0.6, 0.4),
-    'colsample_bytree': uniform(0.6, 0.4)
-}
-
-xgb_rand = RandomizedSearchCV(
-    XGBRegressor(objective='reg:squarederror', random_state=42),
-    param_distributions=param_dist,
-    n_iter=25,  # tries 25 random combos
-    scoring='r2',
-    cv=5,
-    random_state=42)
-
-xgb_rand.fit(X_train, y_train)
-print("Best parameters found:", xgb_rand.best_params_)
-print("Best R² (CV):", xgb_rand.best_score_)
-
-xgb_best = xgb_rand.best_estimator_
-
-y_pred = xgb_best.predict(X_test)
-
-r2 = r2_score(y_test, y_pred)
-mae = mean_absolute_error(y_test, y_pred)
-mape = mean_absolute_percentage_error(y_test, y_pred)
-norm_error = mae / np.std(df['sales'])
-
-print(f"Test R²: {r2:.3f}")
-print(f"Mean Absolute Error: ${mae:,.2f}")
-print(f"MAPE: {mape*100:.2f}%")
-print(f"Normalized Error: {norm_error:.3f}")
-
-
-
-
-
-# Test X values
